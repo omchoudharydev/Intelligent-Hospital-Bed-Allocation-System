@@ -28,6 +28,9 @@ import java.util.List;
 @Configuration
 public class SecurityConfig {
 
+    private static final String PRODUCTION_ORIGIN =
+            "https://intelligent-hospital-bed-allocation-system-production.up.railway.app";
+
     // ==================================================
     // PASSWORD ENCODER
     // ==================================================
@@ -43,7 +46,7 @@ public class SecurityConfig {
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource(
-            @Value("${app.cors.allowed-origins:http://localhost:8080,http://127.0.0.1:8080,http://localhost:5500,https://intelligent-hospital-bed-allocation-system-production.up.railway.app}")
+            @Value("${app.cors.allowed-origins:http://localhost:8080,http://127.0.0.1:8080,http://localhost:5500}")
             String origins) {
 
         CorsConfiguration config = new CorsConfiguration();
@@ -53,6 +56,12 @@ public class SecurityConfig {
                 .filter(origin -> !origin.isEmpty())
                 .distinct()
                 .toList();
+
+        // Explicitly include the Railway production frontend.
+        if (!allowedOrigins.contains(PRODUCTION_ORIGIN)) {
+            allowedOrigins = new java.util.ArrayList<>(allowedOrigins);
+            allowedOrigins.add(PRODUCTION_ORIGIN);
+        }
 
         config.setAllowedOrigins(allowedOrigins);
 
@@ -65,19 +74,14 @@ public class SecurityConfig {
                 "OPTIONS"
         ));
 
-        config.setAllowedHeaders(List.of(
-                "Authorization",
-                "Content-Type",
-                "Accept",
-                "X-Razorpay-Signature",
-                "x-razorpay-event-id"
-        ));
+        // Allow standard request headers and JWT Authorization.
+        config.setAllowedHeaders(List.of("*"));
 
         config.setExposedHeaders(List.of(
                 "Content-Disposition"
         ));
 
-        // JWT is sent through Authorization header.
+        // JWT authentication uses Authorization header.
         config.setAllowCredentials(false);
 
         config.setMaxAge(3600L);
@@ -91,8 +95,7 @@ public class SecurityConfig {
     }
 
     // ==================================================
-    // DISABLE AUTOMATIC JWT FILTER REGISTRATION
-    // JWT FILTER RUNS ONLY INSIDE SPRING SECURITY CHAIN
+    // PREVENT DUPLICATE JWT FILTER REGISTRATION
     // ==================================================
 
     @Bean
@@ -118,13 +121,13 @@ public class SecurityConfig {
 
         return http
 
-                // CSRF disabled because this application uses stateless JWT authentication.
+                // Stateless JWT authentication.
                 .csrf(csrf -> csrf.disable())
 
-                // Enable CORS configuration.
+                // Enable configured CORS.
                 .cors(Customizer.withDefaults())
 
-                // Stateless authentication.
+                // No HTTP session.
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(
                                 SessionCreationPolicy.STATELESS
@@ -163,10 +166,13 @@ public class SecurityConfig {
                         })
                 )
 
-                // Endpoint authorization.
+                // ==================================================
+                // AUTHORIZATION RULES
+                // ==================================================
+
                 .authorizeHttpRequests(auth -> auth
 
-                        // Public static resources.
+                        // Public frontend resources.
                         .requestMatchers(
                                 "/",
                                 "/index.html",
@@ -183,11 +189,9 @@ public class SecurityConfig {
                                 "/api/webhooks/razorpay"
                         ).permitAll()
 
-                        // Allow CORS preflight requests.
-                        .requestMatchers(
-                                HttpMethod.OPTIONS,
-                                "/**"
-                        ).permitAll()
+                        // CORS preflight requests.
+                        .requestMatchers(HttpMethod.OPTIONS, "/**")
+                        .permitAll()
 
                         // Bed board access.
                         .requestMatchers("/api/bed-board")
@@ -217,12 +221,12 @@ public class SecurityConfig {
                         .anyRequest().authenticated()
                 )
 
-                // Disable HTTP Basic, form login and default logout.
+                // Disable default authentication mechanisms.
                 .httpBasic(basic -> basic.disable())
                 .formLogin(form -> form.disable())
                 .logout(logout -> logout.disable())
 
-                // Add JWT authentication filter.
+                // JWT filter inside Spring Security chain.
                 .addFilterBefore(
                         jwtFilter,
                         UsernamePasswordAuthenticationFilter.class
